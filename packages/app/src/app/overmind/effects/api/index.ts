@@ -1,26 +1,32 @@
+import { TemplateType } from '@codesandbox/common/lib/templates';
 import {
   CurrentUser,
-  Dependency,
-  Sandbox,
-  Module,
-  GitChanges,
-  EnvironmentVariable,
-  PopularSandboxes,
-  SandboxPick,
-  PickedSandboxes,
-  UploadedFilesInfo,
-  Directory,
-  GitInfo,
-  GitCommit,
-  GitPr,
-  PaymentDetails,
-  Profile,
-  UserSandbox,
   CustomTemplate,
+  Dependency,
+  Directory,
+  EnvironmentVariable,
+  GitChanges,
+  GitCommit,
+  GitInfo,
+  GitPr,
+  Module,
+  PaymentDetails,
+  PickedSandboxes,
+  PopularSandboxes,
+  Profile,
+  Sandbox,
+  SandboxPick,
+  UploadedFilesInfo,
+  UserSandbox,
 } from '@codesandbox/common/lib/types';
-import { TemplateType } from '@codesandbox/common/lib/templates';
 import { client } from 'app/graphql/client';
 import { LIST_TEMPLATES } from 'app/components/CreateNewSandbox/queries';
+
+import {
+  transformSandbox,
+  transformDirectory,
+  transformModule,
+} from '../utils/sandbox';
 import apiFactory, { Api, ApiConfig } from './apiFactory';
 
 let api: Api;
@@ -64,39 +70,38 @@ export default {
     const sandbox = await api.get<Sandbox>(`/sandboxes/${id}`);
 
     // We need to add client side properties for tracking
-    return {
-      ...sandbox,
-      modules: sandbox.modules.map(module => ({
-        ...module,
-        savedCode: null,
-        isNotSynced: false,
-      })),
-    };
+    return transformSandbox(sandbox);
   },
-  forkSandbox(id: string, body?: unknown): Promise<Sandbox> {
+  async forkSandbox(id: string, body?: unknown): Promise<Sandbox> {
     const url = id.includes('/')
       ? `/sandboxes/fork/${id}`
       : `/sandboxes/${id}/fork`;
 
-    return api.post(url, body || {});
+    const sandbox = await api.post<Sandbox>(url, body || {});
+
+    return transformSandbox(sandbox);
   },
   createModule(sandboxId: string, module: Module): Promise<Module> {
-    return api.post(`/sandboxes/${sandboxId}/modules`, {
-      module: {
-        title: module.title,
-        directoryShortid: module.directoryShortid,
-        code: module.code,
-        isBinary: module.isBinary === undefined ? false : module.isBinary,
-      },
-    });
+    return api
+      .post(`/sandboxes/${sandboxId}/modules`, {
+        module: {
+          title: module.title,
+          directoryShortid: module.directoryShortid,
+          code: module.code,
+          isBinary: module.isBinary === undefined ? false : module.isBinary,
+        },
+      })
+      .then(transformModule);
   },
   deleteModule(sandboxId: string, moduleShortid: string): Promise<void> {
     return api.delete(`/sandboxes/${sandboxId}/modules/${moduleShortid}`);
   },
   saveModuleCode(sandboxId: string, module: Module): Promise<Module> {
-    return api.put(`/sandboxes/${sandboxId}/modules/${module.shortid}`, {
-      module: { code: module.code },
-    });
+    return api
+      .put(`/sandboxes/${sandboxId}/modules/${module.shortid}`, {
+        module: { code: module.code },
+      })
+      .then(transformModule);
   },
   saveModules(sandboxId: string, modules: Module[]) {
     return api.put(`/sandboxes/${sandboxId}/modules/mupdate`, {
@@ -196,12 +201,14 @@ export default {
     directoryShortid: string,
     title: string
   ): Promise<Directory> {
-    return api.post(`/sandboxes/${sandboxId}/directories`, {
-      directory: {
-        title,
-        directoryShortid,
-      },
-    });
+    return api
+      .post(`/sandboxes/${sandboxId}/directories`, {
+        directory: {
+          title,
+          directoryShortid,
+        },
+      })
+      .then(transformDirectory);
   },
   saveModuleDirectory(
     sandboxId: string,
@@ -250,7 +257,7 @@ export default {
       name,
     });
   },
-  massCreateModules(
+  async massCreateModules(
     sandboxId: string,
     directoryShortid: string | null,
     modules: Module[],
@@ -259,11 +266,18 @@ export default {
     modules: Module[];
     directories: Directory[];
   }> {
-    return api.post(`/sandboxes/${sandboxId}/modules/mcreate`, {
+    const data = (await api.post(`/sandboxes/${sandboxId}/modules/mcreate`, {
       directoryShortid,
       modules,
       directories,
-    });
+    })) as {
+      modules: Module[];
+      directories: Directory[];
+    };
+
+    data.modules = data.modules.map(transformModule);
+    data.directories = data.directories.map(transformDirectory);
+    return data;
   },
   createGit(
     sandboxId: string,
